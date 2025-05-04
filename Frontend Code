@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Real-time Disaster Alert System</title>
+<style>
+  /* Reset and base */
+  * {
+    box-sizing: border-box;
+  }
+  body, html {
+    margin: 0; padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #0b1e3d;
+    color: #fff;
+    height: 100%;
+    overflow: hidden;
+  }
+  #container {
+    display: flex;
+    flex-direction: column;
+    height: 600px;
+    max-width: 350px;
+    margin: 0 auto;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.9);
+    user-select: none;
+    background: linear-gradient(135deg, #001429, #003568);
+  }
+  header {
+    background: #002860;
+    padding: 15px 20px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 1.5px;
+    border-bottom: 2px solid #00aaff;
+  }
+  #dashboard {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+  }
+  #map {
+    flex: 2;
+    height: 100%;
+    border-right: 2px solid #004a8f;
+  }
+  #alerts {
+    flex: 1;
+    background: #003568;
+    padding: 15px 12px;
+    overflow-y: auto;
+    border-left: 2px solid #004a8f;
+  }
+  #alerts h2 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+    font-weight: 700;
+    border-bottom: 1px solid #004a8f;
+    padding-bottom: 8px;
+  }
+  .alert-item {
+    background: #00467f;
+    margin-bottom: 12px;
+    padding: 12px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+  }
+  .alert-item:hover {
+    background: #0064bc;
+  }
+  .alert-type {
+    font-weight: 700;
+    color: #ffcc00;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+  }
+  .alert-desc {
+    margin: 6px 0 4px;
+    font-size: 0.85rem;
+    line-height: 1.2;
+  }
+  .alert-time {
+    font-size: 0.75rem;
+    color: #a3c9ff;
+  }
+  /* Notification popup */
+  #notification {
+    position: fixed;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%) translateY(250%);
+    background: #021f54cc;
+    backdrop-filter: blur(10px);
+    color: #fff;
+    padding: 14px 30px;
+    border-radius: 25px;
+    box-shadow: 0 0 15px #00aaffaa;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    font-size: 0.95rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: all 0.5s ease-in-out;
+    z-index: 1000;
+    max-width: 320px;
+    text-align: center;
+  }
+  #notification.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+  }
+  /* Scrollbar customization for alerts */
+  #alerts::-webkit-scrollbar {
+    width: 6px;
+  }
+  #alerts::-webkit-scrollbar-track {
+    background: #012b5a;
+    border-radius: 3px;
+  }
+  #alerts::-webkit-scrollbar-thumb {
+    background: #00a4ff88;
+    border-radius: 3px;
+  }
+  /* Responsive tweaks */
+  @media (max-width: 380px) {
+    #container {
+      max-width: 100vw;
+      border-radius: 0;
+    }
+    #dashboard {
+      flex-direction: column;
+    }
+    #map {
+      flex: 1 1 50%;
+      border-right: none;
+      border-bottom: 2px solid #004a8f;
+      height: 300px;
+    }
+    #alerts {
+      flex: 1 1 50%;
+      border-left: none;
+      height: 300px;
+    }
+  }
+</style>
+<script src="https://atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.js"></script>
+<link rel="stylesheet" href="https://atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.css" />
+
+</head>
+<body>
+<div id="container">
+  <header>Real-time Disaster Alert System</header>
+  <div id="dashboard">
+    <div id="map" aria-label="Disaster alert map" role="application"></div>
+    <section id="alerts" aria-live="polite" aria-atomic="true" aria-relevant="additions">
+      <h2>Latest Alerts</h2>
+      <div id="alert-list">
+        <!-- Alerts will be appended here -->
+      </div>
+    </section>
+  </div>
+</div>
+<div id="notification" role="alert"></div>
+<script>
+  // Azure Maps credentials (demo key from Microsoft, needs to be replaced with a valid subscription key)
+  const AZURE_MAPS_KEY = 'Your_Azure_Maps_Key_Here';
+
+  // Initialize map centered on center US
+  const map = new atlas.Map('map', {
+    center: [-98.5795, 39.8283],
+    zoom: 4,
+    language: 'en-US',
+    authOptions: {
+      authType: 'subscriptionKey',
+      subscriptionKey: AZURE_MAPS_KEY
+    }
+  });
+
+  // Global alert data store
+  let alerts = [];
+
+  // Icon URLs for different disaster types (public domain / open resource icons)
+  const iconUrls = {
+    earthquake: 'https://img.icons8.com/ios-filled/50/fa314a/earthquake.png',
+    flood: 'https://img.icons8.com/ios-filled/50/00aaff/flood.png',
+    wildfire: 'https://img.icons8.com/ios-filled/50/ff6e27/fire-element--v1.png',
+    storm: 'https://img.icons8.com/ios-filled/50/0099ff/cloud-storm.png',
+    tsunami: 'https://img.icons8.com/ios-filled/50/0000ff/waves.png'
+  };
+
+  // Create a symbol layer for disaster markers
+  let datasource;
+  map.events.add('ready', () => {
+    datasource = new atlas.source.DataSource();
+    map.sources.add(datasource);
+
+    const symbolLayer = new atlas.layer.SymbolLayer(datasource, null, {
+      iconOptions: {
+        image: ['get', 'icon'],
+        anchor: 'center',
+        allowOverlap: true,
+        size: 0.7
+      },
+      textOptions: {
+        textField: ['get', 'type'],
+        offset: [0, 1.2],
+        color: '#fff',
+        size: 12,
+        allowOverlap: false
+      }
+    });
+    map.layers.add(symbolLayer);
+
+    // Start fetching alerts
+    startFetchingAlerts();
+  });
+
+  // Simulate real-time disaster data stream
+  // In real app, fetch from Azure Function API & update datasource accordingly
+  function startFetchingAlerts() {
+    // Pull initial data once
+    generateMockAlerts();
+
+    // Then every 15 seconds, add a new alert
+    setInterval(() => {
+      generateMockAlerts();
+    }, 15000);
+  }
+
+  // Generate mock disaster alert data - simulates real-time data
+  function generateMockAlerts() {
+    const disasterTypes = ['earthquake', 'flood', 'wildfire', 'storm', 'tsunami'];
+    const now = new Date();
+
+    // Randomly generate 1-3 new alerts
+    let newCount = Math.floor(Math.random() * 3) + 1;
+    let newAlerts = [];
+
+    for (let i = 0; i < newCount; i++) {
+      // Random coordinates roughly inside continental US
+      let longitude = -124 + Math.random() * 58; // approx between -124 and -66
+      let latitude = 25 + Math.random() * 24; // approx between 25 and 49
+
+      let type = disasterTypes[Math.floor(Math.random() * disasterTypes.length)];
+      let severityOptions = ['Minor', 'Moderate', 'Severe', 'Critical'];
+      let severity = severityOptions[Math.floor(Math.random() * severityOptions.length)];
+
+      let alert = {
+        id: Date.now() + i,
+        type: type,
+        description: ${severity} ${type.charAt(0).toUpperCase() + type.slice(1)} detected.,
+        time: now.toISOString(),
+        coords: [longitude, latitude],
+        icon: type
+      };
+      newAlerts.push(alert);
+    }
+
+    pushNewAlerts(newAlerts);
+  }
+
+  // Push new alerts to global store, update map and alert list, show notification
+  function pushNewAlerts(newAlerts) {
+    newAlerts.forEach(alert => {
+      // Add to alerts store
+      alerts.unshift(alert); // newest on top
+
+      // Add marker to map datasource
+      datasource.add(new atlas.data.Feature(new atlas.data.Point(alert.coords), {
+        icon: iconUrls[alert.icon] ? alert.icon : 'earthquake',
+        type: alert.type
+      }));
+
+      // Add alert to list
+      addAlertToList(alert);
+
+      // Show notification for important severity levels
+      if(['Severe', 'Critical'].includes(alert.description.split(' ')[0])) {
+        showNotification(${alert.description} Location: ${alert.coords[1].toFixed(2)}, ${alert.coords[0].toFixed(2)});
+      }
+    });
+
+    // Limit alert list length to 30
+    while(alerts.length > 30) {
+      alerts.pop();
+    }
+    // Remove oldest points from datasource accordingly
+    if(datasource.getShapes().length > 30) {
+      let shapesToRemove = datasource.getShapes().slice(30);
+      shapesToRemove.forEach(shape => datasource.remove(shape));
+    }
+  }
+
+  // Format ISO time for display
+  function formatTime(isoTime) {
+    const date = new Date(isoTime);
+    return date.toLocaleString(undefined, {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', month: 'short', day: 'numeric'
+    });
+  }
+
+  // Add alert item to sidebar list
+  function addAlertToList(alert) {
+    const alertList = document.getElementById('alert-list');
+    const div = document.createElement('div');
+    div.className = 'alert-item';
+    div.setAttribute('tabindex', '0');
+    div.setAttribute('role', 'button');
+    div.setAttribute('aria-label', ${alert.type} alert: ${alert.description});
+
+    div.innerHTML = `
+      <div class="alert-type">${alert.type}</div>
+      <div class="alert-desc">${alert.description}</div>
+      <div class="alert-time">${formatTime(alert.time)}</div>
+    `;
+
+    div.onclick = () => {
+      // Center map on selected alert
+      map.setCamera({
+        center: alert.coords,
+        zoom: 8,
+        type: 'fly'
+      });
+    };
+
+    alertList.prepend(div);
+  }
+
+  let notificationTimer;
+  const notificationDiv = document.getElementById('notification');
+
+  // Show alert notification popup on bottom center
+  function showNotification(text) {
+    notificationDiv.textContent = text;
+    notificationDiv.classList.add('show');
+
+    clearTimeout(notificationTimer);
+    notificationTimer = setTimeout(() => {
+      notificationDiv.classList.remove('show');
+    }, 7000);
+  }
+</script>
+</body>
+</html>
